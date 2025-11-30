@@ -157,7 +157,24 @@ export function BottomPanel() {
         {/* Audio Reference Section */}
         <Card className="flex flex-col min-h-0">
           <CardHeader>
-            <CardTitle>Audio Reference</CardTitle>
+            <div className="flex items-center justify-between w-full">
+              <CardTitle>Audio Reference</CardTitle>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="text-muted-foreground hover:text-foreground transition-colors">
+                    <Info className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm">Audio Reference</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Select an audio style from the grid below or use your timeline as a reference for generating your song.
+                    </p>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col gap-6 min-h-0 overflow-auto">
             {/* Audio Style Grid */}
@@ -246,24 +263,7 @@ export function BottomPanel() {
 
             {/* Selected Audio Reference */}
             <div className="flex-1 flex flex-col">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-medium text-muted-foreground">Selected Audio Reference</h3>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="text-muted-foreground hover:text-foreground transition-colors">
-                      <Info className="h-4 w-4" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80">
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm">Selected Audio Reference</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Select an audio style from the grid above or upload your own track to use as a reference for generating your song.
-                      </p>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
+              <h3 className="text-sm font-medium mb-2 text-muted-foreground">Selected Audio Reference</h3>
               {selectedAudioStyle || isTimelineReference ? (
                 <div className="flex-1 border rounded-lg bg-muted/50 flex flex-col items-center justify-center p-4 gap-3">
                   <div className="text-center">
@@ -361,7 +361,24 @@ export function BottomPanel() {
         {/* Lyrics Section */}
         <Card className="flex flex-col min-h-0">
           <CardHeader>
-            <CardTitle>Lyrics</CardTitle>
+            <div className="flex items-center justify-between w-full">
+              <CardTitle>Lyrics</CardTitle>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="text-muted-foreground hover:text-foreground transition-colors">
+                    <Info className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80">
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm">Lyrics</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Enter lyrics or text that will be used as a reference for generating the song lyrics. You can also select themes from the grid below.
+                    </p>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col gap-6 min-h-0 overflow-auto">
             {/* Lyrics Theme Grid */}
@@ -402,24 +419,7 @@ export function BottomPanel() {
 
             {/* Lyrics Reference */}
             <div className="flex-1 flex flex-col">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-muted-foreground">Lyrics Reference</h3>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="text-muted-foreground hover:text-foreground transition-colors">
-                      <Info className="h-4 w-4" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80">
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm">Lyrics Reference</h4>
-                      <p className="text-sm text-muted-foreground">
-                        Enter lyrics or text that will be used as a reference for generating the song lyrics. You can also select a theme from the grid above.
-                      </p>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
+              <h3 className="text-sm font-medium mb-3 text-muted-foreground">Lyrics Reference</h3>
               <div className="flex-1 min-h-[120px] border rounded-lg bg-background">
                 <textarea
                   className="w-full h-full p-3 resize-none border-0 rounded-lg bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none"
