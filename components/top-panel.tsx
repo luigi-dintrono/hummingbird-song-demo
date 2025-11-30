@@ -390,6 +390,51 @@ export function TopPanel() {
     };
   }, [currentTime]);
 
+  // Listen for timeline control events from bottom panel
+  useEffect(() => {
+    const handlePlayTimeline = async () => {
+      if (!isPlaying) {
+        await unlockAudio();
+        setIsPlaying(true);
+      }
+    };
+
+    const handlePauseTimeline = () => {
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+    };
+
+    const handleStopTimeline = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+      tracks.forEach((track) => {
+        if (track.audioElement) {
+          track.audioElement.pause();
+          track.audioElement.currentTime = 0;
+        }
+      });
+    };
+
+    window.addEventListener('playTimeline', handlePlayTimeline);
+    window.addEventListener('pauseTimeline', handlePauseTimeline);
+    window.addEventListener('stopTimeline', handleStopTimeline);
+
+    return () => {
+      window.removeEventListener('playTimeline', handlePlayTimeline);
+      window.removeEventListener('pauseTimeline', handlePauseTimeline);
+      window.removeEventListener('stopTimeline', handleStopTimeline);
+    };
+  }, [isPlaying, tracks]);
+
+  // Notify bottom panel when timeline play state changes
+  useEffect(() => {
+    const event = new CustomEvent('timelinePlayStateChanged', {
+      detail: { isPlaying }
+    });
+    window.dispatchEvent(event);
+  }, [isPlaying]);
+
   // Load default tracks on component mount
   useEffect(() => {
     const loadDefaultTracks = async () => {
@@ -432,7 +477,7 @@ export function TopPanel() {
                   solo: false,
                   recordArmed: false,
                   volume: 100,
-                  instrument: "Default Track",
+                  //instrument: "Default Track",
                 };
                 
                 defaultTracks.push(newTrack);

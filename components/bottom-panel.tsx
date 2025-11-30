@@ -8,14 +8,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Plus, Info, Zap, Play, Pause, RotateCcw, CheckCircle2, Circle, RefreshCw, PlusCircle } from "lucide-react";
+import { Plus, Info, Zap, Play, Pause, RotateCcw, CheckCircle2, Circle, RefreshCw, PlusCircle, Music } from "lucide-react";
 import { generateLyrics } from "@/lib/generate-lyrics";
 
 // Audio style options
 const AUDIO_STYLES = [
   "JAZZ", "PUNK", "REGGAE", "COUNTRY",
   "POP", "ROCK", "BLUES", "OPERA",
-  "POP", "DRUMS", "SOUL", "INDIE",
+  "DRUMS", "SOUL", "INDIE",
   "RAP", "LATIN", "CLASSICAL", "TECHNO",
 ];
 
@@ -33,11 +33,42 @@ export function BottomPanel() {
   const [lyricsState, setLyricsState] = useState<"empty" | "completed">("empty");
   const [generatedSongState, setGeneratedSongState] = useState<"empty" | "completed">("empty");
   const [selectedAudioStyle, setSelectedAudioStyle] = useState<string | null>(null);
+  const [isTimelineReference, setIsTimelineReference] = useState<boolean>(false);
   const [selectedLyricsThemes, setSelectedLyricsThemes] = useState<string[]>([]);
   const [lyricsText, setLyricsText] = useState<string>("");
   const [isGeneratingLyrics, setIsGeneratingLyrics] = useState<boolean>(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Load audio style from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedAudioStyle = localStorage.getItem('hummingbird-selectedAudioStyle');
+      if (savedAudioStyle) {
+        setSelectedAudioStyle(savedAudioStyle);
+        setAudioReferenceState("completed");
+      }
+    } catch (error) {
+      console.warn('Failed to load audio style from localStorage:', error);
+    }
+  }, []);
+
+  // Save audio style to localStorage when it changes
+  useEffect(() => {
+    if (selectedAudioStyle) {
+      try {
+        localStorage.setItem('hummingbird-selectedAudioStyle', selectedAudioStyle);
+      } catch (error) {
+        console.warn('Failed to save audio style to localStorage:', error);
+      }
+    } else {
+      try {
+        localStorage.removeItem('hummingbird-selectedAudioStyle');
+      } catch (error) {
+        console.warn('Failed to remove audio style from localStorage:', error);
+      }
+    }
+  }, [selectedAudioStyle]);
   const [selectedGeneratedSong, setSelectedGeneratedSong] = useState<string | null>(null);
   const [isGeneratedSongPlaying, setIsGeneratedSongPlaying] = useState<boolean>(false);
   const generatedSongAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -75,9 +106,23 @@ export function BottomPanel() {
     }
   }, []);
 
+  // Listen for timeline playback state changes from top panel
+  useEffect(() => {
+    const handleTimelinePlayState = (event: Event) => {
+      const customEvent = event as CustomEvent<{ isPlaying: boolean }>;
+      setIsAudioPlaying(customEvent.detail.isPlaying);
+    };
+
+    window.addEventListener('timelinePlayStateChanged', handleTimelinePlayState);
+
+    return () => {
+      window.removeEventListener('timelinePlayStateChanged', handleTimelinePlayState);
+    };
+  }, []);
+
   // Auto-play audio when style is selected
   useEffect(() => {
-    if (selectedAudioStyle && audioRef.current) {
+    if (selectedAudioStyle && audioRef.current && !isTimelineReference) {
       const playAudio = async () => {
         try {
           audioRef.current!.currentTime = 0;
@@ -90,7 +135,7 @@ export function BottomPanel() {
       };
       playAudio();
     }
-  }, [selectedAudioStyle]);
+  }, [selectedAudioStyle, isTimelineReference]);
 
   // Update audio element when selected generated song changes
   useEffect(() => {
@@ -119,8 +164,46 @@ export function BottomPanel() {
             <div>
               <h3 className="text-sm font-medium mb-3 text-muted-foreground">Audio Style</h3>
               <div className="grid grid-cols-4 gap-2">
+                {/* Special button to add timeline as audio reference - First position */}
+                <Button
+                  variant={isTimelineReference ? "default" : "outline"}
+                  size="sm"
+                  className={`h-10 rounded-lg border-dashed ${
+                    isTimelineReference
+                      ? "bg-foreground text-background hover:bg-foreground/90 border-2"
+                      : "bg-background hover:bg-accent border-2 border-muted-foreground/50"
+                  }`}
+                  onClick={() => {
+                    if (isTimelineReference) {
+                      setSelectedAudioStyle(null);
+                      setAudioReferenceState("empty");
+                      setIsTimelineReference(false);
+                      // Stop timeline playback
+                      const stopEvent = new CustomEvent('stopTimeline', {
+                        detail: {}
+                      });
+                      window.dispatchEvent(stopEvent);
+                      setIsAudioPlaying(false);
+                    } else {
+                      // Set timeline as reference and start playing
+                      setIsTimelineReference(true);
+                      setSelectedAudioStyle(null);
+                      setAudioReferenceState("completed");
+                      
+                      // Dispatch event to top panel to start playing timeline
+                      const event = new CustomEvent('playTimeline', {
+                        detail: {}
+                      });
+                      window.dispatchEvent(event);
+                      setIsAudioPlaying(true);
+                    }
+                  }}
+                >
+                  <Music className="h-4 w-4 mr-1.5" />
+                  <span className="text-xs">ADD TIMELINE</span>
+                </Button>
                 {AUDIO_STYLES.map((style, index) => {
-                  const isSelected = selectedAudioStyle === style;
+                  const isSelected = selectedAudioStyle === style && !isTimelineReference;
                   return (
                     <Button
                       key={index}
@@ -135,6 +218,7 @@ export function BottomPanel() {
                         if (isSelected) {
                           setSelectedAudioStyle(null);
                           setAudioReferenceState("empty");
+                          setIsTimelineReference(false);
                           if (audioRef.current) {
                             audioRef.current.pause();
                             audioRef.current.currentTime = 0;
@@ -143,6 +227,13 @@ export function BottomPanel() {
                         } else {
                           setSelectedAudioStyle(style);
                           setAudioReferenceState("completed");
+                          setIsTimelineReference(false);
+                          // Stop timeline if it was playing
+                          const stopEvent = new CustomEvent('stopTimeline', {
+                            detail: {}
+                          });
+                          window.dispatchEvent(stopEvent);
+                          setIsAudioPlaying(false);
                         }
                       }}
                     >
@@ -173,31 +264,47 @@ export function BottomPanel() {
                   </PopoverContent>
                 </Popover>
               </div>
-              {selectedAudioStyle ? (
+              {selectedAudioStyle || isTimelineReference ? (
                 <div className="flex-1 border rounded-lg bg-muted/50 flex flex-col items-center justify-center p-4 gap-3">
                   <div className="text-center">
-                    <p className="text-sm font-medium text-foreground mb-1">Selected Style</p>
-                    <p className="text-lg font-semibold text-foreground">{selectedAudioStyle}</p>
+                    <p className="text-sm font-medium text-foreground mb-1">
+                      {isTimelineReference ? "Selected Reference" : "Selected Style"}
+                    </p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {isTimelineReference ? "Timeline" : selectedAudioStyle}
+                    </p>
                   </div>
-                  <audio
-                    ref={audioRef}
-                    src={`/audio-styles/${selectedAudioStyle.toLowerCase()}.mp3`}
-                    onPlay={() => setIsAudioPlaying(true)}
-                    onPause={() => setIsAudioPlaying(false)}
-                    onEnded={() => setIsAudioPlaying(false)}
-                    preload="auto"
-                  />
+                  {!isTimelineReference && (
+                    <audio
+                      ref={audioRef}
+                      src={`/audio-styles/${selectedAudioStyle?.toLowerCase()}.mp3`}
+                      onPlay={() => setIsAudioPlaying(true)}
+                      onPause={() => setIsAudioPlaying(false)}
+                      onEnded={() => setIsAudioPlaying(false)}
+                      preload="auto"
+                    />
+                  )}
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
                       size="icon"
                       className="h-10 w-10"
                       onClick={() => {
-                        if (audioRef.current) {
-                          if (isAudioPlaying) {
-                            audioRef.current.pause();
-                          } else {
-                            audioRef.current.play();
+                        if (isTimelineReference) {
+                          // Control timeline playback
+                          const event = new CustomEvent(isAudioPlaying ? 'pauseTimeline' : 'playTimeline', {
+                            detail: {}
+                          });
+                          window.dispatchEvent(event);
+                          setIsAudioPlaying(!isAudioPlaying);
+                        } else {
+                          // Control audio style playback
+                          if (audioRef.current) {
+                            if (isAudioPlaying) {
+                              audioRef.current.pause();
+                            } else {
+                              audioRef.current.play();
+                            }
                           }
                         }
                       }}
@@ -213,9 +320,23 @@ export function BottomPanel() {
                       size="icon"
                       className="h-10 w-10"
                       onClick={() => {
-                        if (audioRef.current) {
-                          audioRef.current.currentTime = 0;
-                          audioRef.current.play();
+                        if (isTimelineReference) {
+                          // Restart timeline
+                          const stopEvent = new CustomEvent('stopTimeline', {
+                            detail: {}
+                          });
+                          window.dispatchEvent(stopEvent);
+                          const playEvent = new CustomEvent('playTimeline', {
+                            detail: {}
+                          });
+                          window.dispatchEvent(playEvent);
+                          setIsAudioPlaying(true);
+                        } else {
+                          // Restart audio style
+                          if (audioRef.current) {
+                            audioRef.current.currentTime = 0;
+                            audioRef.current.play();
+                          }
                         }
                       }}
                     >
