@@ -330,6 +330,141 @@ export function TopPanel() {
     });
   };
 
+  // Listen for addTrackToTimeline event from bottom panel
+  useEffect(() => {
+    const handleAddTrackToTimeline = async (event: Event) => {
+      const customEvent = event as CustomEvent<{ audioUrl: string; name: string }>;
+      const { audioUrl, name } = customEvent.detail;
+
+      console.log(`Adding track to timeline: ${name} from ${audioUrl}`);
+
+      const audio = new Audio(audioUrl);
+      audio.preload = "auto";
+      audio.volume = 1.0;
+      
+      const trackId = Date.now().toString();
+      
+      const handleCanPlay = () => {
+        const duration = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+        
+        const newTrack: AudioTrack = {
+          id: trackId,
+          name: name,
+          audioUrl: audioUrl,
+          audioElement: audio,
+          startTime: currentTime,
+          duration: duration,
+          color: `hsl(${Math.random() * 360}, 70%, 50%)`,
+          muted: false,
+          solo: false,
+          recordArmed: false,
+          volume: 100,
+          instrument: "Generated Song",
+        };
+        
+        audioElementsRef.current.set(trackId, audio);
+        setTracks(prev => [...prev, newTrack]);
+        
+        audio.removeEventListener('canplay', handleCanPlay);
+        audio.removeEventListener('error', handleError);
+      };
+      
+      const handleError = (e: Event) => {
+        console.error('Error loading generated song:', e);
+        audio.removeEventListener('canplay', handleCanPlay);
+        audio.removeEventListener('error', handleError);
+      };
+      
+      audio.addEventListener('canplay', handleCanPlay);
+      audio.addEventListener('error', handleError);
+      audio.load();
+    };
+
+    window.addEventListener('addTrackToTimeline', handleAddTrackToTimeline);
+
+    return () => {
+      window.removeEventListener('addTrackToTimeline', handleAddTrackToTimeline);
+    };
+  }, [currentTime]);
+
+  // Load default tracks on component mount
+  useEffect(() => {
+    const loadDefaultTracks = async () => {
+      const defaultTrackFiles = [
+        'ES_Online Casino, Cards, Shuffle 05 - Epidemic Sound.mp3',
+        'ES_The Sleepy Sneaky Sway - Luella Gren.mp3',
+        'pop.mp3'
+      ];
+      const defaultTrackNames = ['Track 1', 'Track 2', 'Track 3'];
+      const defaultTracks: AudioTrack[] = [];
+
+      for (let i = 0; i < defaultTrackFiles.length; i++) {
+        const fileName = defaultTrackFiles[i];
+        const trackName = defaultTrackNames[i];
+        // Encode the filename for URL to handle spaces and special characters
+        const audioUrl = `/audio-track-default/${encodeURIComponent(fileName)}`;
+        const audio = new Audio(audioUrl);
+        
+        audio.preload = "auto";
+        audio.volume = 1.0;
+        
+        const trackId = `default-${i}-${Date.now()}`;
+        
+        try {
+          // Wait for audio to be ready
+          await new Promise<void>((resolve, reject) => {
+            const handleCanPlay = () => {
+              const duration = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+              
+              if (duration > 0) {
+                const newTrack: AudioTrack = {
+                  id: trackId,
+                  name: trackName,
+                  audioUrl,
+                  audioElement: audio,
+                  startTime: i * 2, // Stagger tracks by 2 seconds
+                  duration: duration,
+                  color: `hsl(${(i * 60) % 360}, 70%, 50%)`, // Different colors for each track
+                  muted: false,
+                  solo: false,
+                  recordArmed: false,
+                  volume: 100,
+                  instrument: "Default Track",
+                };
+                
+                defaultTracks.push(newTrack);
+                audioElementsRef.current.set(trackId, audio);
+                audio.removeEventListener('canplay', handleCanPlay);
+                audio.removeEventListener('error', handleError);
+                resolve();
+              }
+            };
+            
+            const handleError = (e: Event) => {
+              console.warn(`Failed to load default track: ${fileName}`, e);
+              audio.removeEventListener('canplay', handleCanPlay);
+              audio.removeEventListener('error', handleError);
+              reject(new Error(`Failed to load ${fileName}`));
+            };
+            
+            audio.addEventListener('canplay', handleCanPlay);
+            audio.addEventListener('error', handleError);
+            audio.load();
+          });
+        } catch (error) {
+          console.warn(`Skipping default track ${fileName}:`, error);
+        }
+      }
+
+      if (defaultTracks.length > 0) {
+        setTracks(defaultTracks);
+        console.log(`✓ Loaded ${defaultTracks.length} default tracks`);
+      }
+    };
+
+    loadDefaultTracks();
+  }, []); // Only run on mount
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
