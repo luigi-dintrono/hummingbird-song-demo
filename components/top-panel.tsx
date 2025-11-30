@@ -416,24 +416,55 @@ export function TopPanel() {
       });
     };
 
+    const handleSeekTimeline = (event: Event) => {
+      const customEvent = event as CustomEvent<{ time: number }>;
+      const seekTime = customEvent.detail.time;
+      
+      // Seek timeline to the specified time (capped at 10 seconds)
+      const clampedTime = Math.min(seekTime, 10);
+      setCurrentTime(clampedTime);
+      
+      // Update all tracks to the correct position
+      tracks.forEach((track) => {
+        if (track.audioElement) {
+          const trackPlayTime = clampedTime - track.startTime;
+          if (trackPlayTime >= 0 && trackPlayTime < track.duration) {
+            track.audioElement.currentTime = trackPlayTime;
+          } else if (trackPlayTime < 0) {
+            track.audioElement.currentTime = 0;
+          }
+        }
+      });
+      
+      // Update the start time reference
+      startTimeRef.current = performance.now() - clampedTime * 1000;
+    };
+
     window.addEventListener('playTimeline', handlePlayTimeline);
     window.addEventListener('pauseTimeline', handlePauseTimeline);
     window.addEventListener('stopTimeline', handleStopTimeline);
+    window.addEventListener('seekTimeline', handleSeekTimeline);
 
     return () => {
       window.removeEventListener('playTimeline', handlePlayTimeline);
       window.removeEventListener('pauseTimeline', handlePauseTimeline);
       window.removeEventListener('stopTimeline', handleStopTimeline);
+      window.removeEventListener('seekTimeline', handleSeekTimeline);
     };
   }, [isPlaying, tracks]);
 
-  // Notify bottom panel when timeline play state changes
+  // Notify bottom panel when timeline play state changes and send current time
   useEffect(() => {
     const event = new CustomEvent('timelinePlayStateChanged', {
-      detail: { isPlaying }
+      detail: { isPlaying, currentTime }
     });
     window.dispatchEvent(event);
-  }, [isPlaying]);
+    
+    // Pause timeline at 10 seconds
+    if (isPlaying && currentTime >= 10) {
+      setIsPlaying(false);
+    }
+  }, [isPlaying, currentTime]);
 
   // Load default tracks on component mount
   useEffect(() => {
@@ -905,7 +936,7 @@ export function TopPanel() {
   return (
     <div className="h-full flex flex-col bg-muted/30 border-b">
       {/* Transport Controls Bar */}
-      <div className="flex items-center gap-4 p-3 border-b bg-background shrink-0">
+      <div className="relative flex items-center gap-4 p-3 border-b bg-background shrink-0">
         {/* Playback Controls */}
         <div className="flex items-center gap-2">
           <Button
@@ -955,6 +986,11 @@ export function TopPanel() {
           >
             <Repeat className="h-4 w-4" />
           </Button>
+        </div>
+
+        {/* Ableton Text - Centered */}
+        <div className="absolute left-1/2 transform -translate-x-1/2">
+          <span className="text-md font-bold text-foreground">Ableton</span>
         </div>
 
         {/* Time/Tempo Display */}

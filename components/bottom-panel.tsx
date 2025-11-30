@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/popover";
 import { Plus, Info, Zap, Play, Pause, RotateCcw, CheckCircle2, Circle, RefreshCw, PlusCircle, Music } from "lucide-react";
 import { generateLyrics } from "@/lib/generate-lyrics";
+import { Slider } from "@/components/ui/slider";
 
 // Audio style options
 const AUDIO_STYLES = [
@@ -38,7 +39,10 @@ export function BottomPanel() {
   const [lyricsText, setLyricsText] = useState<string>("");
   const [isGeneratingLyrics, setIsGeneratingLyrics] = useState<boolean>(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState<number>(0);
+  const [timelineCurrentTime, setTimelineCurrentTime] = useState<number>(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioTimeUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load audio style from localStorage on mount
   useEffect(() => {
@@ -71,6 +75,8 @@ export function BottomPanel() {
   }, [selectedAudioStyle]);
   const [selectedGeneratedSong, setSelectedGeneratedSong] = useState<string | null>(null);
   const [isGeneratedSongPlaying, setIsGeneratedSongPlaying] = useState<boolean>(false);
+  const [generatedSongCurrentTime, setGeneratedSongCurrentTime] = useState<number>(0);
+  const [generatedSongDuration, setGeneratedSongDuration] = useState<number>(0);
   const generatedSongAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isGeneratingSong, setIsGeneratingSong] = useState<boolean>(false);
   // Track if lyrics were generated (vs manually typed) to know when to save
@@ -109,8 +115,21 @@ export function BottomPanel() {
   // Listen for timeline playback state changes from top panel
   useEffect(() => {
     const handleTimelinePlayState = (event: Event) => {
-      const customEvent = event as CustomEvent<{ isPlaying: boolean }>;
+      const customEvent = event as CustomEvent<{ isPlaying: boolean; currentTime?: number }>;
       setIsAudioPlaying(customEvent.detail.isPlaying);
+      if (customEvent.detail.currentTime !== undefined) {
+        const time = Math.min(customEvent.detail.currentTime, 10); // Cap at 10 seconds
+        setTimelineCurrentTime(time);
+        
+        // Pause timeline if it reaches 10 seconds
+        if (customEvent.detail.isPlaying && time >= 10) {
+          const pauseEvent = new CustomEvent('pauseTimeline', {
+            detail: {}
+          });
+          window.dispatchEvent(pauseEvent);
+          setIsAudioPlaying(false);
+        }
+      }
     };
 
     window.addEventListener('timelinePlayStateChanged', handleTimelinePlayState);
@@ -126,6 +145,7 @@ export function BottomPanel() {
       const playAudio = async () => {
         try {
           audioRef.current!.currentTime = 0;
+          setAudioCurrentTime(0);
           await audioRef.current!.play();
           setIsAudioPlaying(true);
         } catch (error) {
@@ -137,12 +157,81 @@ export function BottomPanel() {
     }
   }, [selectedAudioStyle, isTimelineReference]);
 
+  // Update audio time slider and stop at 10 seconds
+  useEffect(() => {
+    if (audioRef.current && !isTimelineReference && selectedAudioStyle) {
+      const audio = audioRef.current;
+      
+      const updateTime = () => {
+        const currentTime = audio.currentTime;
+        setAudioCurrentTime(Math.min(currentTime, 10)); // Cap at 10 seconds
+        
+        // Stop audio at 10 seconds
+        if (currentTime >= 10) {
+          audio.pause();
+          audio.currentTime = 10;
+          setIsAudioPlaying(false);
+        }
+      };
+      
+      const handleTimeUpdate = () => updateTime();
+      
+      if (isAudioPlaying) {
+        audio.addEventListener('timeupdate', handleTimeUpdate);
+        // Also use interval for smoother updates
+        audioTimeUpdateIntervalRef.current = setInterval(updateTime, 100);
+      }
+      
+      return () => {
+        audio.removeEventListener('timeupdate', handleTimeUpdate);
+        if (audioTimeUpdateIntervalRef.current) {
+          clearInterval(audioTimeUpdateIntervalRef.current);
+          audioTimeUpdateIntervalRef.current = null;
+        }
+      };
+    }
+  }, [isAudioPlaying, selectedAudioStyle, isTimelineReference]);
+
+  // Reset audio time when style changes
+  useEffect(() => {
+    if (selectedAudioStyle && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      setAudioCurrentTime(0);
+    }
+  }, [selectedAudioStyle]);
+
   // Update audio element when selected generated song changes
   useEffect(() => {
     if (selectedGeneratedSong && generatedSongAudioRef.current) {
       generatedSongAudioRef.current.src = selectedGeneratedSong;
       generatedSongAudioRef.current.load();
       setIsGeneratedSongPlaying(false);
+      setGeneratedSongCurrentTime(0);
+    }
+  }, [selectedGeneratedSong]);
+
+  // Track generated song playback time and duration
+  useEffect(() => {
+    if (generatedSongAudioRef.current) {
+      const audio = generatedSongAudioRef.current;
+      
+      const handleLoadedMetadata = () => {
+        const duration = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+        setGeneratedSongDuration(duration);
+      };
+      
+      const handleTimeUpdate = () => {
+        const currentTime = isFinite(audio.currentTime) ? audio.currentTime : 0;
+        setGeneratedSongCurrentTime(currentTime);
+      };
+      
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.addEventListener('timeupdate', handleTimeUpdate);
+      
+      return () => {
+        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        audio.removeEventListener('timeupdate', handleTimeUpdate);
+      };
     }
   }, [selectedGeneratedSong]);
 
@@ -195,6 +284,7 @@ export function BottomPanel() {
                       setSelectedAudioStyle(null);
                       setAudioReferenceState("empty");
                       setIsTimelineReference(false);
+                      setTimelineCurrentTime(0);
                       // Stop timeline playback
                       const stopEvent = new CustomEvent('stopTimeline', {
                         detail: {}
@@ -206,6 +296,7 @@ export function BottomPanel() {
                       setIsTimelineReference(true);
                       setSelectedAudioStyle(null);
                       setAudioReferenceState("completed");
+                      setTimelineCurrentTime(0);
                       
                       // Dispatch event to top panel to start playing timeline
                       const event = new CustomEvent('playTimeline', {
@@ -245,6 +336,7 @@ export function BottomPanel() {
                           setSelectedAudioStyle(style);
                           setAudioReferenceState("completed");
                           setIsTimelineReference(false);
+                          setTimelineCurrentTime(0);
                           // Stop timeline if it was playing
                           const stopEvent = new CustomEvent('stopTimeline', {
                             detail: {}
@@ -278,9 +370,25 @@ export function BottomPanel() {
                     <audio
                       ref={audioRef}
                       src={`/audio-styles/${selectedAudioStyle?.toLowerCase()}.mp3`}
-                      onPlay={() => setIsAudioPlaying(true)}
+                      onPlay={() => {
+                        setIsAudioPlaying(true);
+                        // Ensure we don't play past 10 seconds
+                        if (audioRef.current && audioRef.current.currentTime >= 10) {
+                          audioRef.current.currentTime = 10;
+                          audioRef.current.pause();
+                          setIsAudioPlaying(false);
+                        }
+                      }}
                       onPause={() => setIsAudioPlaying(false)}
                       onEnded={() => setIsAudioPlaying(false)}
+                      onTimeUpdate={() => {
+                        if (audioRef.current && audioRef.current.currentTime >= 10) {
+                          audioRef.current.pause();
+                          audioRef.current.currentTime = 10;
+                          setIsAudioPlaying(false);
+                          setAudioCurrentTime(10);
+                        }
+                      }}
                       preload="auto"
                     />
                   )}
@@ -303,6 +411,11 @@ export function BottomPanel() {
                             if (isAudioPlaying) {
                               audioRef.current.pause();
                             } else {
+                              // If we're at or past 10 seconds, restart from beginning
+                              if (audioRef.current.currentTime >= 10) {
+                                audioRef.current.currentTime = 0;
+                                setAudioCurrentTime(0);
+                              }
                               audioRef.current.play();
                             }
                           }
@@ -322,6 +435,7 @@ export function BottomPanel() {
                       onClick={() => {
                         if (isTimelineReference) {
                           // Restart timeline
+                          setTimelineCurrentTime(0);
                           const stopEvent = new CustomEvent('stopTimeline', {
                             detail: {}
                           });
@@ -335,6 +449,7 @@ export function BottomPanel() {
                           // Restart audio style
                           if (audioRef.current) {
                             audioRef.current.currentTime = 0;
+                            setAudioCurrentTime(0);
                             audioRef.current.play();
                           }
                         }
@@ -343,6 +458,58 @@ export function BottomPanel() {
                       <RotateCcw className="h-4 w-4" />
                     </Button>
                   </div>
+                  {(selectedAudioStyle || isTimelineReference) && (
+                    <div className="w-full px-2">
+                      <Slider
+                        value={[isTimelineReference ? timelineCurrentTime : audioCurrentTime]}
+                        onValueChange={(values) => {
+                          const newTime = Math.min(values[0], 10); // Cap at 10 seconds
+                          
+                          if (isTimelineReference) {
+                            setTimelineCurrentTime(newTime);
+                            // Dispatch event to seek timeline
+                            const seekEvent = new CustomEvent('seekTimeline', {
+                              detail: { time: newTime }
+                            });
+                            window.dispatchEvent(seekEvent);
+                            // If scrubbed to 10 seconds or beyond, pause
+                            if (newTime >= 10) {
+                              const pauseEvent = new CustomEvent('pauseTimeline', {
+                                detail: {}
+                              });
+                              window.dispatchEvent(pauseEvent);
+                              setIsAudioPlaying(false);
+                            }
+                          } else {
+                            setAudioCurrentTime(newTime);
+                            if (audioRef.current) {
+                              audioRef.current.currentTime = newTime;
+                              // If scrubbed to 10 seconds or beyond, pause
+                              if (newTime >= 10) {
+                                audioRef.current.pause();
+                                setIsAudioPlaying(false);
+                              }
+                            }
+                          }
+                        }}
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        className="w-full"
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                        <span>
+                          {(() => {
+                            const current = isTimelineReference ? timelineCurrentTime : audioCurrentTime;
+                            const minutes = Math.floor(current / 60);
+                            const seconds = Math.floor(current % 60);
+                            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                          })()}
+                        </span>
+                        <span>0:10</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex-1 border-2 border-dashed border-muted-foreground/30 rounded-lg flex flex-col items-center justify-center bg-muted/30">
@@ -508,85 +675,138 @@ export function BottomPanel() {
               </div>
             </div>
 
-            {/* Sound Controls */}
-            {generatedSongState === "completed" && (
-              <div className="flex items-center gap-2 mb-4">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10"
-                  onClick={() => {
-                    // If no song is selected, select a random one
-                    if (!selectedGeneratedSong) {
-                      const songs = [
-                        '/audio-generated-demo/generated-song-1.mp3',
-                        '/audio-generated-demo/generated-song-2.mp3',
-                        '/audio-generated-demo/generated-song-3.mp3',
-                      ];
-                      const randomSong = songs[Math.floor(Math.random() * songs.length)];
-                      setSelectedGeneratedSong(randomSong);
-                      // Wait for audio element to update
-                      setTimeout(() => {
-                        if (generatedSongAudioRef.current) {
-                          generatedSongAudioRef.current.play();
-                          setIsGeneratedSongPlaying(true);
-                        }
-                      }, 100);
-                    } else if (generatedSongAudioRef.current) {
-                      if (isGeneratedSongPlaying) {
-                        generatedSongAudioRef.current.pause();
-                        setIsGeneratedSongPlaying(false);
-                      } else {
-                        generatedSongAudioRef.current.play();
-                        setIsGeneratedSongPlaying(true);
-                      }
-                    }
-                  }}
-                >
-                  {isGeneratedSongPlaying ? (
-                    <Pause className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10"
-                  onClick={() => {
-                    if (generatedSongAudioRef.current) {
-                      generatedSongAudioRef.current.currentTime = 0;
-                      if (!isGeneratedSongPlaying) {
-                        generatedSongAudioRef.current.play();
-                        setIsGeneratedSongPlaying(true);
-                      }
-                    }
-                  }}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </Button>
-                {selectedGeneratedSong && (
-                  <audio
-                    ref={generatedSongAudioRef}
-                    src={selectedGeneratedSong}
-                    onPlay={() => setIsGeneratedSongPlaying(true)}
-                    onPause={() => setIsGeneratedSongPlaying(false)}
-                    onEnded={() => setIsGeneratedSongPlaying(false)}
-                    preload="auto"
-                  />
-                )}
-              </div>
-            )}
-
             {/* Song Visualization Bar */}
             {generatedSongState === "completed" && selectedGeneratedSong ? (
               <div className="flex-1 min-h-[200px] border rounded-lg bg-muted/50 flex flex-col p-4 gap-3">
-                <div className="text-center mb-2">
-                  <p className="text-sm font-medium text-foreground mb-1">Generated Song</p>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedGeneratedSong.split('/').pop()?.replace('.mp3', '') || 'Generated Song'}
-                  </p>
+                {/* Song Name */}
+                {selectedGeneratedSong && (
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      {selectedGeneratedSong.split('/').pop()?.replace('.mp3', '') || 'Generated Song'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Play Controls */}
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10"
+                    onClick={() => {
+                      // If no song is selected, select a random one
+                      if (!selectedGeneratedSong) {
+                        const songs = [
+                          '/audio-generated-demo/generated-song-1.mp3',
+                          '/audio-generated-demo/generated-song-2.mp3',
+                          '/audio-generated-demo/generated-song-3.mp3',
+                        ];
+                        const randomSong = songs[Math.floor(Math.random() * songs.length)];
+                        setSelectedGeneratedSong(randomSong);
+                        // Wait for audio element to update
+                        setTimeout(() => {
+                          if (generatedSongAudioRef.current) {
+                            generatedSongAudioRef.current.play();
+                            setIsGeneratedSongPlaying(true);
+                          }
+                        }, 100);
+                      } else if (generatedSongAudioRef.current) {
+                        if (isGeneratedSongPlaying) {
+                          generatedSongAudioRef.current.pause();
+                          setIsGeneratedSongPlaying(false);
+                        } else {
+                          generatedSongAudioRef.current.play();
+                          setIsGeneratedSongPlaying(true);
+                        }
+                      }
+                    }}
+                  >
+                    {isGeneratedSongPlaying ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10"
+                    onClick={() => {
+                      if (generatedSongAudioRef.current) {
+                        generatedSongAudioRef.current.currentTime = 0;
+                        setGeneratedSongCurrentTime(0);
+                        if (!isGeneratedSongPlaying) {
+                          generatedSongAudioRef.current.play();
+                          setIsGeneratedSongPlaying(true);
+                        }
+                      }
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </Button>
+                  {selectedGeneratedSong && (
+                    <audio
+                      ref={generatedSongAudioRef}
+                      src={selectedGeneratedSong}
+                      onPlay={() => setIsGeneratedSongPlaying(true)}
+                      onPause={() => setIsGeneratedSongPlaying(false)}
+                      onEnded={() => setIsGeneratedSongPlaying(false)}
+                      onLoadedMetadata={() => {
+                        if (generatedSongAudioRef.current) {
+                          const duration = isFinite(generatedSongAudioRef.current.duration) 
+                            ? generatedSongAudioRef.current.duration 
+                            : 0;
+                          setGeneratedSongDuration(duration);
+                        }
+                      }}
+                      onTimeUpdate={() => {
+                        if (generatedSongAudioRef.current) {
+                          const currentTime = isFinite(generatedSongAudioRef.current.currentTime)
+                            ? generatedSongAudioRef.current.currentTime
+                            : 0;
+                          setGeneratedSongCurrentTime(currentTime);
+                        }
+                      }}
+                      preload="auto"
+                    />
+                  )}
                 </div>
+
+                {/* Slider */}
+                {generatedSongDuration > 0 && (
+                  <div className="w-full px-2">
+                    <Slider
+                      value={[generatedSongCurrentTime]}
+                      onValueChange={(values) => {
+                        const newTime = Math.min(values[0], generatedSongDuration);
+                        setGeneratedSongCurrentTime(newTime);
+                        if (generatedSongAudioRef.current) {
+                          generatedSongAudioRef.current.currentTime = newTime;
+                        }
+                      }}
+                      min={0}
+                      max={generatedSongDuration}
+                      step={0.1}
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                      <span>
+                        {(() => {
+                          const minutes = Math.floor(generatedSongCurrentTime / 60);
+                          const seconds = Math.floor(generatedSongCurrentTime % 60);
+                          return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                        })()}
+                      </span>
+                      <span>
+                        {(() => {
+                          const minutes = Math.floor(generatedSongDuration / 60);
+                          const seconds = Math.floor(generatedSongDuration % 60);
+                          return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 {/* Simple waveform visualization bar */}
                 <div className="flex-1 flex items-end justify-center gap-1">
                   {Array.from({ length: 50 }).map((_, i) => {
