@@ -42,6 +42,38 @@ export function BottomPanel() {
   const [isGeneratedSongPlaying, setIsGeneratedSongPlaying] = useState<boolean>(false);
   const generatedSongAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isGeneratingSong, setIsGeneratingSong] = useState<boolean>(false);
+  // Track if lyrics were generated (vs manually typed) to know when to save
+  const lyricsGeneratedRef = useRef<boolean>(false);
+
+  // Load lyrics from localStorage on component mount
+  useEffect(() => {
+    try {
+      const savedLyricsText = localStorage.getItem('hummingbird_lyrics_text');
+      const savedLyricsThemes = localStorage.getItem('hummingbird_lyrics_themes');
+      
+      if (savedLyricsText) {
+        setLyricsText(savedLyricsText);
+        // If there are saved lyrics, mark lyrics as completed
+        if (savedLyricsText.trim().length > 0) {
+          setLyricsState("completed");
+        }
+      }
+      
+      if (savedLyricsThemes) {
+        try {
+          const themes = JSON.parse(savedLyricsThemes);
+          if (Array.isArray(themes) && themes.length > 0) {
+            setSelectedLyricsThemes(themes);
+            setLyricsState("completed");
+          }
+        } catch (e) {
+          console.warn('Failed to parse saved lyrics themes:', e);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load lyrics from localStorage:', error);
+    }
+  }, []);
 
   // Auto-play audio when style is selected
   useEffect(() => {
@@ -304,6 +336,14 @@ export function BottomPanel() {
                   } else if (result.lyrics) {
                     setLyricsText(result.lyrics);
                     setLyricsState("completed");
+                    lyricsGeneratedRef.current = true;
+                    // Save generated lyrics to localStorage
+                    try {
+                      localStorage.setItem('hummingbird_lyrics_text', result.lyrics);
+                      localStorage.setItem('hummingbird_lyrics_themes', JSON.stringify(selectedLyricsThemes));
+                    } catch (error) {
+                      console.warn('Failed to save lyrics to localStorage:', error);
+                    }
                   }
                   setIsGeneratingLyrics(false);
                 }}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -33,6 +33,7 @@ export function TopPanel() {
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [masterVolume, setMasterVolume] = useState([100]);
   const [timelineWidth, setTimelineWidth] = useState(0);
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -48,11 +49,13 @@ export function TopPanel() {
     trackId: string | null;
     startX: number;
     initialStartTime: number;
+    hasMoved: boolean;
   }>({
     isDragging: false,
     trackId: null,
     startX: 0,
     initialStartTime: 0,
+    hasMoved: false,
   });
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const rulerScrollRef = useRef<HTMLDivElement | null>(null);
@@ -395,12 +398,12 @@ export function TopPanel() {
         'ES_The Sleepy Sneaky Sway - Luella Gren.mp3',
         'pop.mp3'
       ];
-      const defaultTrackNames = ['Track 1', 'Track 2', 'Track 3'];
       const defaultTracks: AudioTrack[] = [];
 
       for (let i = 0; i < defaultTrackFiles.length; i++) {
         const fileName = defaultTrackFiles[i];
-        const trackName = defaultTrackNames[i];
+        // Use filename without extension as track name
+        const trackName = fileName.replace(/\.[^/.]+$/, "");
         // Encode the filename for URL to handle spaces and special characters
         const audioUrl = `/audio-track-default/${encodeURIComponent(fileName)}`;
         const audio = new Audio(audioUrl);
@@ -422,7 +425,7 @@ export function TopPanel() {
                   name: trackName,
                   audioUrl,
                   audioElement: audio,
-                  startTime: i * 2, // Stagger tracks by 2 seconds
+                  startTime: 0, // All tracks start at the same time
                   duration: duration,
                   color: `hsl(${(i * 60) % 360}, 70%, 50%)`, // Different colors for each track
                   muted: false,
@@ -723,6 +726,30 @@ export function TopPanel() {
     }));
   };
 
+  const deleteTrack = useCallback((trackId: string) => {
+    setTracks(prevTracks => {
+      const trackToDelete = prevTracks.find(t => t.id === trackId);
+      if (trackToDelete) {
+        // Clean up audio element
+        if (trackToDelete.audioElement) {
+          trackToDelete.audioElement.pause();
+          trackToDelete.audioElement.src = '';
+          trackToDelete.audioElement.load();
+        }
+        // Remove from audio elements ref
+        audioElementsRef.current.delete(trackId);
+        // Clean up blob URL if it's a blob
+        if (trackToDelete.audioUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(trackToDelete.audioUrl);
+        }
+      }
+      const newTracks = prevTracks.filter(t => t.id !== trackId);
+      return newTracks;
+    });
+    // Clear selection if deleted track was selected
+    setSelectedTrackId(prev => prev === trackId ? null : prev);
+  }, []);
+
   const formatTime = (seconds: number) => {
     const bars = Math.floor(seconds / 4); // Assuming 4/4 time
     const beats = Math.floor((seconds % 4) / 1);
@@ -744,32 +771,43 @@ export function TopPanel() {
     const startX = e.clientX - containerRect.left + timelineScrollRef.current.scrollLeft;
     
     dragStateRef.current = {
-      isDragging: true,
+      isDragging: false,
       trackId,
       startX,
       initialStartTime: currentStartTime,
+      hasMoved: false,
     };
+    
+    // Select track immediately on mousedown
+    setSelectedTrackId(trackId);
     
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    if (!dragStateRef.current.isDragging || !dragStateRef.current.trackId || !timelineScrollRef.current) return;
+    if (!dragStateRef.current.trackId || !timelineScrollRef.current) return;
     
     const containerRect = timelineScrollRef.current.getBoundingClientRect();
     const currentX = e.clientX - containerRect.left + timelineScrollRef.current.scrollLeft;
     const deltaX = currentX - dragStateRef.current.startX;
-    const deltaTime = deltaX / pixelsPerSecond; // Convert pixels to seconds
-    const newStartTime = Math.max(0, dragStateRef.current.initialStartTime + deltaTime);
     
-    setTracks(prevTracks =>
-      prevTracks.map(track =>
-        track.id === dragStateRef.current.trackId
-          ? { ...track, startTime: newStartTime }
-          : track
-      )
-    );
+    // If mouse moved more than 5 pixels, consider it a drag
+    if (Math.abs(deltaX) > 5) {
+      dragStateRef.current.isDragging = true;
+      dragStateRef.current.hasMoved = true;
+      
+      const deltaTime = deltaX / pixelsPerSecond; // Convert pixels to seconds
+      const newStartTime = Math.max(0, dragStateRef.current.initialStartTime + deltaTime);
+      
+      setTracks(prevTracks =>
+        prevTracks.map(track =>
+          track.id === dragStateRef.current.trackId
+            ? { ...track, startTime: newStartTime }
+            : track
+        )
+      );
+    }
   };
 
   const handleMouseUp = () => {
@@ -778,6 +816,7 @@ export function TopPanel() {
       trackId: null,
       startX: 0,
       initialStartTime: 0,
+      hasMoved: false,
     };
     
     document.removeEventListener('mousemove', handleMouseMove);
@@ -790,6 +829,30 @@ export function TopPanel() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, []);
+
+  // Handle Delete key to remove selected track
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle Delete if not typing in an input field
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        const target = event.target as HTMLElement;
+        // Don't delete if user is typing in an input field
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+        
+        if (selectedTrackId) {
+          event.preventDefault();
+          deleteTrack(selectedTrackId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedTrackId, deleteTrack]);
 
   const visibleTracks = tracks.length > 0 ? tracks : [];
   const hasSolo = tracks.some(t => t.solo);
@@ -894,8 +957,15 @@ export function TopPanel() {
                   return (
                     <div key={track.id}>
                       <div
-                        className="h-20 bg-background/50 flex flex-col p-2"
+                        className={`h-20 bg-background/50 flex flex-col p-2 cursor-pointer transition-colors ${
+                          selectedTrackId === track.id 
+                            ? 'bg-accent border-l-2 border-foreground' 
+                            : 'hover:bg-accent/50'
+                        }`}
                         style={{ height: `${TRACK_HEIGHT}px` }}
+                        onClick={() => setSelectedTrackId(track.id)}
+                        onFocus={() => setSelectedTrackId(track.id)}
+                        tabIndex={0}
                       >
                     {/* Track Name */}
                     <div className="flex items-center gap-2 mb-2">
@@ -1077,7 +1147,9 @@ export function TopPanel() {
                         
                         {/* Draggable Track Block */}
                         <div
-                          className="absolute border-2 rounded cursor-move select-none transition-transform"
+                          className={`absolute border-2 rounded cursor-move select-none transition-transform ${
+                            selectedTrackId === track.id ? 'ring-2 ring-foreground ring-offset-2' : ''
+                          }`}
                           style={{
                             left: `${left}px`,
                             top: `${index * TRACK_HEIGHT + 2}px`,
@@ -1085,13 +1157,18 @@ export function TopPanel() {
                             height: `${TRACK_HEIGHT - 4}px`,
                             backgroundColor: track.color,
                             opacity: trackOpacity,
-                            borderColor: track.color,
+                            borderColor: selectedTrackId === track.id ? 'hsl(0, 0%, 100%)' : track.color,
                             zIndex: isDragging ? 30 : 10,
                             transform: isDragging ? 'scale(1.02)' : 'scale(1)',
                             boxShadow: isDragging ? '0 4px 12px rgba(0, 0, 0, 0.3)' : 'none',
                             userSelect: 'none',
                           }}
-                          onMouseDown={(e) => handleTrackMouseDown(e, track.id, track.startTime)}
+                          onMouseDown={(e) => {
+                            // Only start drag on left mouse button
+                            if (e.button === 0) {
+                              handleTrackMouseDown(e, track.id, track.startTime);
+                            }
+                          }}
                         >
                           <div className="absolute inset-0 flex items-center px-2 text-xs font-medium text-white drop-shadow overflow-hidden pointer-events-none">
                             {track.name}
