@@ -310,6 +310,9 @@ export function TopPanel() {
       console.warn('Could not unlock audio:', error);
     }
     
+    // Reset audio reference flag when playing directly from top panel
+    isTimelineAudioReferenceRef.current = false;
+    
     setIsPlaying(!isPlaying);
   };
 
@@ -390,12 +393,21 @@ export function TopPanel() {
     };
   }, [currentTime]);
 
+  // Track if timeline is being used as audio reference (for 10-second limit)
+  const isTimelineAudioReferenceRef = useRef<boolean>(false);
+
   // Listen for timeline control events from bottom panel
   useEffect(() => {
     const handlePlayTimeline = async () => {
+      // Mark that timeline is being used as audio reference
+      isTimelineAudioReferenceRef.current = true;
       if (!isPlaying) {
-        await unlockAudio();
-        setIsPlaying(true);
+        try {
+          await unlockAudio();
+          setIsPlaying(true);
+        } catch (error) {
+          console.error('Error unlocking audio:', error);
+        }
       }
     };
 
@@ -420,7 +432,7 @@ export function TopPanel() {
       const customEvent = event as CustomEvent<{ time: number }>;
       const seekTime = customEvent.detail.time;
       
-      // Seek timeline to the specified time (capped at 10 seconds)
+      // Seek timeline to the specified time (capped at 10 seconds for audio reference)
       const clampedTime = Math.min(seekTime, 10);
       setCurrentTime(clampedTime);
       
@@ -453,15 +465,31 @@ export function TopPanel() {
     };
   }, [isPlaying, tracks]);
 
+  // Listen for when timeline is no longer used as audio reference
+  useEffect(() => {
+    const handleTimelineReferenceRemoved = () => {
+      isTimelineAudioReferenceRef.current = false;
+    };
+
+    window.addEventListener('timelineReferenceRemoved', handleTimelineReferenceRemoved);
+    return () => {
+      window.removeEventListener('timelineReferenceRemoved', handleTimelineReferenceRemoved);
+    };
+  }, []);
+
   // Notify bottom panel when timeline play state changes and send current time
   useEffect(() => {
     const event = new CustomEvent('timelinePlayStateChanged', {
-      detail: { isPlaying, currentTime }
+      detail: { 
+        isPlaying, 
+        currentTime,
+        isAudioReference: isTimelineAudioReferenceRef.current 
+      }
     });
     window.dispatchEvent(event);
     
-    // Pause timeline at 10 seconds
-    if (isPlaying && currentTime >= 10) {
+    // Only pause timeline at 10 seconds if it's being used as audio reference
+    if (isTimelineAudioReferenceRef.current && isPlaying && currentTime >= 10) {
       setIsPlaying(false);
     }
   }, [isPlaying, currentTime]);
@@ -470,9 +498,9 @@ export function TopPanel() {
   useEffect(() => {
     const loadDefaultTracks = async () => {
       const defaultTrackFiles = [
-        'ES_Online Casino, Cards, Shuffle 05 - Epidemic Sound.mp3',
-        'ES_The Sleepy Sneaky Sway - Luella Gren.mp3',
-        'pop.mp3'
+        'drum beat.mp3',
+        'Shazam recording.mp3',
+        'Vivaldi Four Seasons Summer Allegro.mp3'
       ];
       const defaultTracks: AudioTrack[] = [];
 

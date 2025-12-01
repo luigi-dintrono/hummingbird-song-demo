@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -79,6 +79,39 @@ export function BottomPanel() {
   const [generatedSongDuration, setGeneratedSongDuration] = useState<number>(0);
   const generatedSongAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isGeneratingSong, setIsGeneratingSong] = useState<boolean>(false);
+
+  // Helper function to select generated song based on audio style
+  const selectGeneratedSong = useCallback(() => {
+    // Available generated songs
+    const availableSongs = [
+      '/audio-generated-demo/generated-song-1.mp3',
+      '/audio-generated-demo/generated-song-2.mp3',
+      '/audio-generated-demo/generated-song-3.mp3',
+      '/audio-generated-demo/generated-song-jazz.mp3',
+      '/audio-generated-demo/generated-song-rock.mp3',
+      '/audio-generated-demo/generated-song-timeline.mp3',
+    ];
+
+    // If timeline is selected, use timeline song
+    if (isTimelineReference) {
+      const timelineSong = '/audio-generated-demo/generated-song-timeline.mp3';
+      if (availableSongs.includes(timelineSong)) {
+        return timelineSong;
+      }
+    }
+
+    // If audio style is selected, try to match it
+    if (selectedAudioStyle) {
+      const styleLower = selectedAudioStyle.toLowerCase();
+      const styleSong = `/audio-generated-demo/generated-song-${styleLower}.mp3`;
+      if (availableSongs.includes(styleSong)) {
+        return styleSong;
+      }
+    }
+
+    // If no match, pick a random song
+    return availableSongs[Math.floor(Math.random() * availableSongs.length)];
+  }, [selectedAudioStyle, isTimelineReference]);
   // Track if lyrics were generated (vs manually typed) to know when to save
   const lyricsGeneratedRef = useRef<boolean>(false);
 
@@ -115,19 +148,32 @@ export function BottomPanel() {
   // Listen for timeline playback state changes from top panel
   useEffect(() => {
     const handleTimelinePlayState = (event: Event) => {
-      const customEvent = event as CustomEvent<{ isPlaying: boolean; currentTime?: number }>;
-      setIsAudioPlaying(customEvent.detail.isPlaying);
-      if (customEvent.detail.currentTime !== undefined) {
-        const time = Math.min(customEvent.detail.currentTime, 10); // Cap at 10 seconds
-        setTimelineCurrentTime(time);
-        
-        // Pause timeline if it reaches 10 seconds
-        if (customEvent.detail.isPlaying && time >= 10) {
-          const pauseEvent = new CustomEvent('pauseTimeline', {
-            detail: {}
-          });
-          window.dispatchEvent(pauseEvent);
-          setIsAudioPlaying(false);
+      const customEvent = event as CustomEvent<{ 
+        isPlaying: boolean; 
+        currentTime?: number;
+        isAudioReference?: boolean;
+      }>;
+      
+      // Only update state and control playback if timeline is selected as audio reference
+      // AND it's actually being used as audio reference (not playing directly from top panel)
+      const isActuallyAudioReference = isTimelineReference && customEvent.detail.isAudioReference === true;
+      
+      if (isTimelineReference) {
+        // Always update the display state if timeline is selected as reference
+        setIsAudioPlaying(customEvent.detail.isPlaying);
+        if (customEvent.detail.currentTime !== undefined) {
+          const time = Math.min(customEvent.detail.currentTime, 10); // Cap at 10 seconds for display
+          setTimelineCurrentTime(time);
+          
+          // Only pause timeline at 10 seconds if it's actually being used as audio reference
+          // (not when playing directly from top panel)
+          if (isActuallyAudioReference && customEvent.detail.isPlaying && time >= 10) {
+            const pauseEvent = new CustomEvent('pauseTimeline', {
+              detail: {}
+            });
+            window.dispatchEvent(pauseEvent);
+            setIsAudioPlaying(false);
+          }
         }
       }
     };
@@ -137,11 +183,14 @@ export function BottomPanel() {
     return () => {
       window.removeEventListener('timelinePlayStateChanged', handleTimelinePlayState);
     };
-  }, []);
+  }, [isTimelineReference]);
 
-  // Auto-play audio when style is selected
+  // Track if selection was made by user interaction (vs loaded from localStorage)
+  const isUserSelectedRef = useRef<boolean>(false);
+
+  // Auto-play audio when style is selected (only if selected by user interaction)
   useEffect(() => {
-    if (selectedAudioStyle && audioRef.current && !isTimelineReference) {
+    if (selectedAudioStyle && audioRef.current && !isTimelineReference && isUserSelectedRef.current) {
       const playAudio = async () => {
         try {
           audioRef.current!.currentTime = 0;
@@ -149,11 +198,13 @@ export function BottomPanel() {
           await audioRef.current!.play();
           setIsAudioPlaying(true);
         } catch (error) {
-          console.error('Error playing audio:', error);
           // Auto-play might be blocked by browser, user will need to click play
+          // Silently fail - this is expected behavior
         }
       };
       playAudio();
+      // Reset flag after attempting to play
+      isUserSelectedRef.current = false;
     }
   }, [selectedAudioStyle, isTimelineReference]);
 
@@ -279,7 +330,7 @@ export function BottomPanel() {
                       ? "bg-foreground text-background hover:bg-foreground/90 border-2"
                       : "bg-background hover:bg-accent border-2 border-muted-foreground/50"
                   }`}
-                  onClick={() => {
+                  onClick={async () => {
                     if (isTimelineReference) {
                       setSelectedAudioStyle(null);
                       setAudioReferenceState("empty");
@@ -290,6 +341,11 @@ export function BottomPanel() {
                         detail: {}
                       });
                       window.dispatchEvent(stopEvent);
+                      // Notify that timeline is no longer used as audio reference
+                      const removedEvent = new CustomEvent('timelineReferenceRemoved', {
+                        detail: {}
+                      });
+                      window.dispatchEvent(removedEvent);
                       setIsAudioPlaying(false);
                     } else {
                       // Set timeline as reference and start playing
@@ -297,6 +353,9 @@ export function BottomPanel() {
                       setSelectedAudioStyle(null);
                       setAudioReferenceState("completed");
                       setTimelineCurrentTime(0);
+                      
+                      // Wait a bit to ensure any previous play/pause operations complete
+                      await new Promise(resolve => setTimeout(resolve, 50));
                       
                       // Dispatch event to top panel to start playing timeline
                       const event = new CustomEvent('playTimeline', {
@@ -333,6 +392,8 @@ export function BottomPanel() {
                             setIsAudioPlaying(false);
                           }
                         } else {
+                          // Mark as user-selected to allow autoplay
+                          isUserSelectedRef.current = true;
                           setSelectedAudioStyle(style);
                           setAudioReferenceState("completed");
                           setIsTimelineReference(false);
@@ -397,15 +458,18 @@ export function BottomPanel() {
                       variant="outline"
                       size="icon"
                       className="h-10 w-10"
-                      onClick={() => {
-                        if (isTimelineReference) {
-                          // Control timeline playback
-                          const event = new CustomEvent(isAudioPlaying ? 'pauseTimeline' : 'playTimeline', {
-                            detail: {}
-                          });
-                          window.dispatchEvent(event);
-                          setIsAudioPlaying(!isAudioPlaying);
-                        } else {
+                  onClick={async () => {
+                    if (isTimelineReference) {
+                      // Control timeline playback
+                      // Wait a bit to ensure any previous operations complete
+                      await new Promise(resolve => setTimeout(resolve, 50));
+                      
+                      const event = new CustomEvent(isAudioPlaying ? 'pauseTimeline' : 'playTimeline', {
+                        detail: {}
+                      });
+                      window.dispatchEvent(event);
+                      setIsAudioPlaying(!isAudioPlaying);
+                    } else {
                           // Control audio style playback
                           if (audioRef.current) {
                             if (isAudioPlaying) {
@@ -432,20 +496,28 @@ export function BottomPanel() {
                       variant="outline"
                       size="icon"
                       className="h-10 w-10"
-                      onClick={() => {
-                        if (isTimelineReference) {
-                          // Restart timeline
-                          setTimelineCurrentTime(0);
-                          const stopEvent = new CustomEvent('stopTimeline', {
-                            detail: {}
-                          });
-                          window.dispatchEvent(stopEvent);
-                          const playEvent = new CustomEvent('playTimeline', {
-                            detail: {}
-                          });
-                          window.dispatchEvent(playEvent);
-                          setIsAudioPlaying(true);
-                        } else {
+                  onClick={async () => {
+                    if (isTimelineReference) {
+                      // Restart timeline
+                      setTimelineCurrentTime(0);
+                      
+                      // Wait a bit to ensure any previous operations complete
+                      await new Promise(resolve => setTimeout(resolve, 50));
+                      
+                      const stopEvent = new CustomEvent('stopTimeline', {
+                        detail: {}
+                      });
+                      window.dispatchEvent(stopEvent);
+                      
+                      // Wait a bit more before playing
+                      await new Promise(resolve => setTimeout(resolve, 50));
+                      
+                      const playEvent = new CustomEvent('playTimeline', {
+                        detail: {}
+                      });
+                      window.dispatchEvent(playEvent);
+                      setIsAudioPlaying(true);
+                    } else {
                           // Restart audio style
                           if (audioRef.current) {
                             audioRef.current.currentTime = 0;
@@ -694,15 +766,10 @@ export function BottomPanel() {
                     size="icon"
                     className="h-10 w-10"
                     onClick={() => {
-                      // If no song is selected, select a random one
+                      // If no song is selected, select based on audio style
                       if (!selectedGeneratedSong) {
-                        const songs = [
-                          '/audio-generated-demo/generated-song-1.mp3',
-                          '/audio-generated-demo/generated-song-2.mp3',
-                          '/audio-generated-demo/generated-song-3.mp3',
-                        ];
-                        const randomSong = songs[Math.floor(Math.random() * songs.length)];
-                        setSelectedGeneratedSong(randomSong);
+                        const song = selectGeneratedSong();
+                        setSelectedGeneratedSong(song);
                         // Wait for audio element to update
                         setTimeout(() => {
                           if (generatedSongAudioRef.current) {
@@ -842,14 +909,9 @@ export function BottomPanel() {
                     setIsGeneratingSong(true);
                     // Simulate generation delay
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    // Select a new random song
-                    const songs = [
-                      '/audio-generated-demo/generated-song-1.mp3',
-                      '/audio-generated-demo/generated-song-2.mp3',
-                      '/audio-generated-demo/generated-song-3.mp3',
-                    ];
-                    const randomSong = songs[Math.floor(Math.random() * songs.length)];
-                    setSelectedGeneratedSong(randomSong);
+                    // Select song based on audio style
+                    const song = selectGeneratedSong();
+                    setSelectedGeneratedSong(song);
                     setIsGeneratingSong(false);
                     // Reset audio if playing
                     if (generatedSongAudioRef.current) {
@@ -893,14 +955,9 @@ export function BottomPanel() {
                   setIsGeneratingSong(true);
                   // Simulate generation delay
                   await new Promise(resolve => setTimeout(resolve, 1000));
-                  // Select a random song from the folder
-                  const songs = [
-                    '/audio-generated-demo/generated-song-1.mp3',
-                    '/audio-generated-demo/generated-song-2.mp3',
-                    '/audio-generated-demo/generated-song-3.mp3',
-                  ];
-                  const randomSong = songs[Math.floor(Math.random() * songs.length)];
-                  setSelectedGeneratedSong(randomSong);
+                  // Select song based on audio style
+                  const song = selectGeneratedSong();
+                  setSelectedGeneratedSong(song);
                   setGeneratedSongState("completed");
                   setIsGeneratingSong(false);
                 }}
